@@ -1,14 +1,27 @@
-# INFO6150_FinalProject
-
 # EventEase
 
 EventEase is a comprehensive event booking platform designed to make it easy for users to browse, explore, and book different types of events. Built with React, Node.js, and MongoDB, the platform provides a seamless experience with a visually appealing design powered by Bootstrap.
+
+Built as a team project for INFO 6150 (Web Design & UX Engineering) at Northeastern University. This is my fork of our team repo; the original lives at [pavan-neu/INFO6150_FinalProject](https://github.com/pavan-neu/INFO6150_FinalProject).
+
+## My Contributions (Aravind Sundaravadivelu)
+
+I owned the backend:
+
+- Designed and built the REST APIs for events, tickets, transactions, and users (Node.js, Express, MongoDB/Mongoose)
+- JWT authentication and role-based access control across the User, Organizer, and Admin roles
+- Stripe payment integration (Payment Intents) with webhook-based payment confirmation
+- Ticket reservation system: 10-minute holds with a cron sweeper that releases expired reservations, preventing double-selling during checkout
+- Request validation, pagination, and unique-index-backed integrity constraints
+- AWS deployment (EC2 for the API, S3) with MongoDB Atlas
+
+<!-- TODO: add 2-3 screenshots here (event browse, checkout, organizer dashboard) -->
 
 ## Features
 
 - **User Authentication**: Complete JWT-based authentication system with role-based access (User, Organizer, Admin)
 - **Event Discovery**: Browse events with advanced filtering, searching, and sorting capabilities
-- **Ticket Booking**: Book tickets for events with secure payment processing
+- **Ticket Booking**: Book tickets with 10-minute reservation holds and secure Stripe payment processing
 - **User Dashboard**: Manage profile, view booked tickets, and transaction history
 - **Organizer Dashboard**: Create and manage events, track ticket sales, and monitor attendance
 - **Admin Panel**: Manage users, and oversee platform operations
@@ -30,39 +43,31 @@ EventEase is a comprehensive event booking platform designed to make it easy for
 - Express.js
 - MongoDB with Mongoose
 - JWT for authentication
+- Stripe (Payment Intents + webhooks)
+- node-cron for scheduled reservation cleanup
 - Bcrypt for password encryption
 - Multer for file uploads
 
 ## Project Structure
 
-The project is structured as follows:
-
 ```
 ├── README.md
-├── package.json
-├── public/
-│   ├── images/
-│   └── index.html
-└── src/
-    ├── App.js
-    ├── components/
-    │   ├── common/
-    │   ├── events/
-    │   ├── forms/
-    │   ├── home/
-    │   ├── layout/
-    │   ├── ui/
-    │   └── user/
-    ├── context/
-    ├── hooks/
-    ├── pages/
-    │   ├── admin/
-    │   ├── auth/
-    │   ├── organizer/
-    │   ├── public/
-    │   └── user/
-    ├── services/
-    └── utils/
+├── backend/                # Express API
+│   ├── config/             # DB connection
+│   ├── controllers/        # events, tickets, payments, transactions, users
+│   ├── crons/              # ticket reservation expiry sweeper
+│   ├── middlewares/        # auth (JWT), uploads (Multer)
+│   ├── models/             # Mongoose schemas
+│   ├── routes/
+│   └── server.js
+└── event-ease/             # React app (Create React App)
+    └── src/
+        ├── components/
+        ├── context/
+        ├── hooks/
+        ├── pages/
+        ├── services/
+        └── utils/
 ```
 
 ## Getting Started
@@ -72,14 +77,15 @@ The project is structured as follows:
 - Node.js (v14 or higher)
 - npm or yarn
 - MongoDB (local or Atlas)
+- A Stripe account (test keys work fine)
 
-### Installation
+### Frontend Setup
 
 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/eventease.git
-cd eventease
+git clone https://github.com/AravindKumar2504/EventEase.git
+cd EventEase/event-ease
 ```
 
 2. Install dependencies
@@ -88,8 +94,7 @@ cd eventease
 npm install
 ```
 
-3. Set up environment variables
-   Create a `.env` file in the root directory and add:
+3. Set up environment variables. Create a `.env` file in `event-ease/` and add:
 
 ```
 REACT_APP_API_URL=http://localhost:5001/api
@@ -117,13 +122,14 @@ cd backend
 npm install
 ```
 
-3. Set up environment variables
-   Create a `.env` file and add:
+3. Set up environment variables. Create a `.env` file and add:
 
 ```
 PORT=5001
 MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_secret_key
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_WEBHOOK_SECRET=your_stripe_webhook_signing_secret
 NODE_ENV=development
 ```
 
@@ -141,7 +147,7 @@ npm run dev
 
 - Register/Login
 - Browse and search events
-- Book tickets for events
+- Book tickets for events (10-minute reservation window)
 - Make payments
 - View tickets and transaction history
 - Update profile information
@@ -161,38 +167,25 @@ npm run dev
 - View platform-wide statistics
 - Manage transactions and refunds
 
-## API Documentation
-
-Comprehensive API documentation is available at `http://localhost:5001/api-docs` when running the backend in development mode.
-
-Key endpoints include:
+## API Endpoints
 
 - `/api/users` - User management
-- `/api/events` - Event management
-- `/api/tickets` - Ticket booking and management
-- `/api/transactions` - Payment processing and history
+- `/api/events` - Event management (pagination and sorting via query params)
+- `/api/tickets` - Ticket booking with 10-minute reservation holds and automatic expiry release
+- `/api/payments` - Stripe Payment Intents, confirmation, and signature-verified webhook
+- `/api/transactions` - Payment history
+
+Note on the Stripe webhook: `/api/payments/webhook` is mounted with the raw request body (before JSON parsing) because Stripe signs the exact bytes of the payload; parsing and re-serializing the body breaks signature verification.
 
 ## Deployment
 
-### Frontend Deployment
+The production deployment runs on AWS with MongoDB Atlas:
 
-1. Build the production-ready code
+- **Backend**: Node/Express API on an EC2 instance
+- **Frontend**: production build (`npm run build`) served from S3
+- **Database**: MongoDB Atlas
 
-```bash
-npm run build
-```
-
-2. Deploy the contents of the `build` folder to your hosting provider (Netlify, Vercel, etc.)
-
-### Backend Deployment
-
-1. Prepare the backend for production
-
-```bash
-npm run build
-```
-
-2. Deploy to a Node.js hosting service (Heroku, Render, DigitalOcean, etc.)
+To deploy your own instance: build the frontend with `npm run build` and host the `build` folder on any static host, run the backend on any Node hosting service, and supply the environment variables listed above (point `REACT_APP_API_URL` at your deployed API before building).
 
 ## Future Enhancements
 
@@ -202,14 +195,6 @@ npm run build
 - Reviews and ratings for events
 - Recurring events support
 - QR code ticket scanning
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## License
 
@@ -221,5 +206,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Node.js](https://nodejs.org/)
 - [Express](https://expressjs.com/)
 - [MongoDB](https://www.mongodb.com/)
+- [Stripe](https://stripe.com/)
 - [Bootstrap](https://getbootstrap.com/)
 - [React Router](https://reactrouter.com/)
