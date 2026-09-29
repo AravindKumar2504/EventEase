@@ -103,22 +103,29 @@ const processExpiredReservations = async () => {
 
     console.log(`Found ${expiredTickets.length} expired ticket reservations`);
 
+    let releasedCount = 0;
+
     // Process each expired ticket
     for (const ticket of expiredTickets) {
-      // Update ticket status
-      ticket.status = "cancelled";
-      await ticket.save();
+      // Cancel only if still reserved; a payment may have claimed it since the find
+      const result = await Ticket.updateOne(
+        { _id: ticket._id, status: "reserved" },
+        { status: "cancelled" }
+      );
+
+      if (result.modifiedCount === 0) continue;
 
       // Update event ticket count
       await Event.findByIdAndUpdate(ticket.event, {
         $inc: { ticketsRemaining: 1 },
       });
 
+      releasedCount++;
       console.log(`Released ticket ${ticket.ticketNumber}`);
     }
 
     return {
-      processedCount: expiredTickets.length,
+      processedCount: releasedCount,
       success: true,
     };
   } catch (error) {

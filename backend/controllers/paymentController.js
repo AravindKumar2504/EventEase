@@ -87,6 +87,101 @@ const createPaymentIntent = async (req, res) => {
   }
 };
 
+// Marks a succeeded payment's tickets paid and records one transaction per
+// ticket. Both /success and the webhook call it, so it is safe to repeat.
+// Tickets the payment could not claim (the hold expired and the seat was
+// released, or another payment got there first) are refunded.
+const fulfillPayment = async (paymentIntent) => {
+  const ticketIds = paymentIntent.metadata.ticketIds.split(',');
+  const userId = paymentIntent.metadata.userId;
+  
+  const fulfilled = [];
+  const unfulfilled = [];
+  
+  for (const ticketId of ticketIds) {
+    // Only a still-reserved ticket can be claimed, so a released seat can't be sold twice
+    let ticket = await Ticket.findOneAndUpdate(
+      { _id: ticketId, user: userId, status: 'reserved' },
+      { status: 'paid', paymentId: paymentIntent.id },
+      { new: true }
+    );
+    
+    // Already claimed by this payment on an earlier call
+    // (tickets paid before paymentId was stored have none)
+    if (!ticket) {
+      ticket = await Ticket.findOne({
+        _id: ticketId,
+        user: userId,
+        $or: [
+          { paymentId: paymentIntent.id },
+          { paymentId: { $exists: false }, status: { $in: ['paid', 'used'] } }
+        ]
+      });
+    }
+    
+    if (ticket) {
+      fulfilled.push(ticket);
+    } else {
+      unfulfilled.push(ticketId);
+    }
+  }
+  
+  // The unique (paymentId, ticket) index turns a repeat or concurrent insert into a no-op
+  const transactions = [];
+  
+  for (const ticket of fulfilled) {
+    const filter = { paymentId: paymentIntent.id, ticket: ticket._id };
+    let transaction;
+    
+    try {
+      transaction = await Transaction.findOneAndUpdate(
+        filter,
+        {
+          $setOnInsert: {
+            user: ticket.user,
+            event: ticket.event,
+            amount: ticket.price,
+            paymentMethod: 'credit_card',
+            status: 'completed'
+          }
+        },
+        { upsert: true, new: true }
+      );
+    } catch (error) {
+      // A concurrent call inserted it first
+      if (error.code !== 11000) throw error;
+      transaction = await Transaction.findOne(filter);
+    }
+    
+    transactions.push(transaction);
+  }
+  
+  // Refund what was charged for unclaimed tickets, minus anything already refunded
+  let refundedCents = 0;
+  
+  if (unfulfilled.length > 0) {
+    const unclaimed = await Ticket.find({ _id: { $in: unfulfilled } });
+    const owedCents = unclaimed.reduce(
+      (sum, ticket) => sum + Math.round(ticket.price * 100),
+      0
+    );
+    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+    refundedCents = Math.min(owedCents, charge.amount);
+    
+    if (refundedCents > charge.amount_refunded) {
+      await stripe.refunds.create(
+        {
+          payment_intent: paymentIntent.id,
+          amount: refundedCents - charge.amount_refunded
+        },
+        { idempotencyKey: `refund-${paymentIntent.id}-${refundedCents}` }
+      );
+    }
+  }
+  
+  return { transactions, unfulfilledCount: unfulfilled.length, refundedCents };
+};
+
 // @desc    Handle payment success
 // @route   POST /api/payments/success
 // @access  Private
@@ -105,38 +200,23 @@ const handlePaymentSuccess = async (req, res) => {
       return res.status(400).json({ message: 'Payment has not succeeded' });
     }
     
-    // Get ticket IDs from metadata
-    const ticketIds = paymentIntent.metadata.ticketIds.split(',');
-    const userId = paymentIntent.metadata.userId;
+    if (!paymentIntent.metadata.ticketIds) {
+      return res.status(400).json({ message: 'Payment is not linked to any tickets' });
+    }
     
     // Verify user matches
-    if (userId !== req.user._id.toString()) {
+    if (paymentIntent.metadata.userId !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Unauthorized' });
     }
     
-    // Update ticket status to paid
-    await Ticket.updateMany(
-      { _id: { $in: ticketIds } },
-      { status: 'paid' }
-    );
+    const { transactions, unfulfilledCount, refundedCents } =
+      await fulfillPayment(paymentIntent);
     
-    // Create transaction records
-    const tickets = await Ticket.find({ _id: { $in: ticketIds } });
-    
-    const transactions = [];
-    
-    for (const ticket of tickets) {
-      const transaction = await Transaction.create({
-        user: req.user._id,
-        event: ticket.event,
-        ticket: ticket._id,
-        amount: ticket.price,
-        paymentMethod: 'credit_card',
-        paymentId: paymentIntentId,
-        status: 'completed'
+    if (unfulfilledCount > 0) {
+      return res.status(409).json({
+        message: `${unfulfilledCount} ticket reservation(s) expired before payment completed, so you were refunded $${(refundedCents / 100).toFixed(2)} for them`,
+        transactions: transactions.map(t => t._id)
       });
-      
-      transactions.push(transaction);
     }
     
     res.status(201).json({
@@ -168,21 +248,15 @@ const handleWebhook = async (req, res) => {
   if (event.type === 'payment_intent.succeeded') {
     const paymentIntent = event.data.object;
     
-    // Process payment success (similar to handlePaymentSuccess but without auth check)
     console.log('PaymentIntent succeeded:', paymentIntent.id);
     
-    // Get ticket IDs from metadata
-    const ticketIds = paymentIntent.metadata.ticketIds?.split(',');
-    
-    if (ticketIds && ticketIds.length) {
+    if (paymentIntent.metadata.ticketIds) {
       try {
-        // Update ticket status to paid if not already done
-        await Ticket.updateMany(
-          { _id: { $in: ticketIds }, status: 'reserved' },
-          { status: 'paid' }
-        );
+        await fulfillPayment(paymentIntent);
       } catch (error) {
-        console.error('Webhook ticket update error:', error);
+        console.error('Webhook fulfillment error:', error);
+        // A non-2xx response makes Stripe retry, and fulfillment is safe to repeat
+        return res.status(500).json({ received: false });
       }
     }
   }

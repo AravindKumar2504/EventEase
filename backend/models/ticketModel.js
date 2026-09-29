@@ -37,6 +37,10 @@ const ticketSchema = mongoose.Schema(
         return this.status === "reserved";
       }
     },
+    // Stripe PaymentIntent that paid for this ticket
+    paymentId: {
+      type: String,
+    },
     qrCode: {
       type: String,
     },

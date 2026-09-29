@@ -41,6 +41,9 @@ const transactionSchema = mongoose.Schema(
   }
 );
 
+// One transaction per ticket per payment, so a retried confirmation can't duplicate it
+transactionSchema.index({ paymentId: 1, ticket: 1 }, { unique: true });
+
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
 module.exports = Transaction;
