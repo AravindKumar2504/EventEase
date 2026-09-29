@@ -6,28 +6,37 @@ const stripe = process.env.STRIPE_SECRET_KEY
 console.log('Stripe initialized:', !!stripe);
 const Transaction = require('../models/transactionModel');
 const Ticket = require('../models/ticketModel');
+const mongoose = require('mongoose');
 
-
+// Stripe rejects USD charges under $0.50
+const MIN_CHARGE_CENTS = 50;
 
 // @desc    Create payment intent
 // @route   POST /api/payments/create-intent
 // @access  Private
 const createPaymentIntent = async (req, res) => {
   try {
-    const { ticketIds, amount } = req.body;
+    // Only ticket IDs come from the client; the amount is computed from the tickets below
+    const { ticketIds } = req.body;
     
-    if (!ticketIds || !ticketIds.length || !amount) {
+    if (!Array.isArray(ticketIds) || !ticketIds.length) {
       return res.status(400).json({ message: 'Missing required fields' });
+    }
+    
+    const uniqueTicketIds = [...new Set(ticketIds.map(String))];
+    
+    if (!uniqueTicketIds.every(id => mongoose.isObjectIdOrHexString(id))) {
+      return res.status(400).json({ message: 'One or more ticket IDs are invalid' });
     }
     
     // Verify all tickets exist and belong to the user
     const tickets = await Ticket.find({
-      _id: { $in: ticketIds },
+      _id: { $in: uniqueTicketIds },
       user: req.user._id,
       status: 'reserved'
     }).populate('event', 'title');
     
-    if (tickets.length !== ticketIds.length) {
+    if (tickets.length !== uniqueTicketIds.length) {
       return res.status(400).json({ 
         message: 'One or more tickets are invalid or not in reserved status' 
       });
@@ -45,19 +54,32 @@ const createPaymentIntent = async (req, res) => {
       });
     }
     
+    // Charge each ticket's price as stored at reservation, summed in whole cents
+    const amountInCents = tickets.reduce(
+      (sum, ticket) => sum + Math.round(ticket.price * 100),
+      0
+    );
+    
+    if (amountInCents < MIN_CHARGE_CENTS) {
+      return res.status(400).json({
+        message: 'Order total is below the $0.50 minimum for card payments'
+      });
+    }
+    
     // Create a payment intent with Stripe
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Stripe works with cents
+      amount: amountInCents,
       currency: 'usd',
       metadata: {
-        ticketIds: ticketIds.join(','),
+        ticketIds: uniqueTicketIds.join(','),
         userId: req.user._id.toString()
       }
     });
     
     res.json({
       clientSecret: paymentIntent.client_secret,
-      paymentIntentId: paymentIntent.id
+      paymentIntentId: paymentIntent.id,
+      amount: amountInCents / 100
     });
   } catch (error) {
     console.error('Payment intent error:', error);

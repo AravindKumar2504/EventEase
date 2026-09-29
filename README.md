@@ -177,6 +177,8 @@ npm run dev
 
 Note on the Stripe webhook: `/api/payments/webhook` is mounted with the raw request body (before JSON parsing) because Stripe signs the exact bytes of the payload; parsing and re-serializing the body breaks signature verification.
 
+Note on pricing: `/api/payments/create-intent` accepts only ticket IDs. The server charges the sum of the prices stored on those reserved tickets, so the browser never decides the amount.
+
 ## Deployment
 
 The production deployment runs on AWS with MongoDB Atlas:
