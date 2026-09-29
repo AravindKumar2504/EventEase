@@ -17,8 +17,7 @@ const PaymentForm = ({ tickets, amount, onPaymentSuccess, onPaymentError }) => {
     const createPaymentIntent = async () => {
       try {
         const response = await axios.post('/api/payments/create-intent', {
-          ticketIds: tickets,
-          amount
+          ticketIds: tickets
         });
         
         setClientSecret(response.data.clientSecret);

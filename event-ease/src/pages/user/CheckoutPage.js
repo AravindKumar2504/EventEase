@@ -51,7 +51,7 @@ const CheckoutPage = () => {
     const createPaymentIntent = async () => {
       if (!ticketData) return;
 
-      const { tickets, totalPrice } = ticketData;
+      const { tickets } = ticketData;
 
       setLoading(true);
       try {
@@ -59,7 +59,6 @@ const CheckoutPage = () => {
           `${API_BASE_URL}/api/payments/create-intent`,
           {
             ticketIds: tickets,
-            amount: totalPrice,
           }
         );
 
