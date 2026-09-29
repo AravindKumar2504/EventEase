@@ -156,7 +156,11 @@ const CheckoutPage = () => {
         }, 1500);
       }
     } catch (err) {
-      setError(err.message || "Payment failed. Please try again.");
+      setError(
+        err.response?.data?.message ||
+          err.message ||
+          "Payment failed. Please try again."
+      );
     } finally {
       setProcessing(false);
     }
