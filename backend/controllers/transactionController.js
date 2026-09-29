@@ -4,64 +4,6 @@ const Transaction = require("../models/transactionModel");
 const Ticket = require("../models/ticketModel");
 const Event = require("../models/eventModel");
 
-// @desc    Create a new transaction
-// @route   POST /api/transactions
-// @access  Private
-const createTransaction = async (req, res) => {
-  try {
-    const { ticketId, paymentMethod, paymentId } = req.body;
-
-    if (!ticketId || !paymentMethod || !paymentId) {
-      return res.status(400).json({
-        message: "Ticket ID, payment method, and payment ID are required",
-      });
-    }
-
-    // Find the ticket
-    const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
-    }
-
-    // Verify ticket belongs to user
-    if (ticket.user.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to process this ticket" });
-    }
-
-    // Check if ticket is in reserved status
-    if (ticket.status !== "reserved") {
-      return res.status(400).json({
-        message: `Cannot process transaction for a ticket with status: ${ticket.status}`,
-      });
-    }
-
-    // Create transaction
-    const transaction = await Transaction.create({
-      user: req.user._id,
-      event: ticket.event,
-      ticket: ticketId,
-      amount: ticket.price,
-      paymentMethod,
-      paymentId,
-      status: "completed",
-    });
-
-    // Update ticket status to paid
-    ticket.status = "paid";
-    await ticket.save();
-
-    res.status(201).json({
-      message: "Transaction completed successfully",
-      transactionId: transaction._id,
-    });
-  } catch (error) {
-    console.error("Create transaction error:", error.message);
-    res.status(500).json({ message: "Server error creating transaction" });
-  }
-};
-
 // @desc    Get transactions for the logged-in user
 // @route   GET /api/transactions/my-transactions
 // @access  Private
@@ -302,7 +244,6 @@ const getPaymentStatus = async (req, res) => {
 };
 
 module.exports = {
-  createTransaction,
   getMyTransactions,
   getTransactionById,
   getTransactionsForEvent,
